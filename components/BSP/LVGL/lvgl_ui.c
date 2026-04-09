@@ -73,7 +73,7 @@ void app_lvgl_ui_init(void)
     lv_image_set_src(img, &hand_map);
 
     /* 设置位置 */
-    lv_obj_align(img, LV_ALIGN_CENTER, 5, 15);  // 往下15像素
+    lv_obj_align(img, LV_ALIGN_CENTER, 0, 0);  // 往下15像素
 
     /* 解锁 */
     lvgl_port_unlock();

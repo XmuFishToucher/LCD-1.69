@@ -56,7 +56,7 @@ esp_err_t init_display() {
     ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_handle));
     ESP_ERROR_CHECK(esp_lcd_panel_init(panel_handle));
     ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel_handle, true));
-    ESP_ERROR_CHECK(esp_lcd_panel_set_gap(panel_handle, 0, 0));
+    ESP_ERROR_CHECK(esp_lcd_panel_set_gap(panel_handle, 10, 20));
 
     // user can flush pre-defined pattern to the screen before we turn on the
     // screen or backlight

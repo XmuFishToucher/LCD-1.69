@@ -1,51 +1,27 @@
-#include "uart.h"
+#ifndef __UART_H__
+#define __UART_H__
 
-void usart_init(uint32_t baudrate)
-{
-    uart_config_t uart_config = {
-        .baud_rate = baudrate,
-        .data_bits = UART_DATA_8_BITS,
-        .parity    = UART_PARITY_DISABLE,
-        .stop_bits = UART_STOP_BITS_1,
-        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-        .source_clk = UART_SCLK_APB,
-    };
+#include <string.h>
+#include "driver/uart.h"
+#include "driver/gpio.h"
 
-    uart_param_config(USART_UX, &uart_config);
+#define USART_UX UART_NUM_2
 
-    uart_set_pin(USART_UX,
-                 USART_TX_GPIO_PIN,
-                 USART_RX_GPIO_PIN,
-                 UART_PIN_NO_CHANGE,
-                 UART_PIN_NO_CHANGE);
+#define USART_TX_GPIO_PIN GPIO_NUM_34
+#define USART_RX_GPIO_PIN GPIO_NUM_35
 
-    uart_driver_install(USART_UX,
-                        RX_BUF_SIZE * 2,
-                        0,
-                        0,
-                        NULL,
-                        0);
-}
+#define RX_BUF_SIZE (1024)
+
+// 初始化
+void usart_init(uint32_t baudrate);                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               
 
 // 发送1字节
-void uart_send_byte(uint8_t data)
-{
-    uart_write_bytes(USART_UX, (const char *)&data, 1);
-}
+void uart_send_byte(uint8_t data);
 
-
-// 发送数据
-int uart_send_data(const uint8_t *data, uint16_t len)
-{
-    return uart_write_bytes(USART_UX, (const char *)data, len);
-}
-
+// 发送缓冲区
+int uart_send_data(const uint8_t *data, uint16_t len);
 
 // 接收数据
-int uart_recv_data(uint8_t *buf, uint16_t max_len, uint32_t timeout_ms)
-{
-    return uart_read_bytes(USART_UX,
-                           buf,
-                           max_len,
-                           pdMS_TO_TICKS(timeout_ms));
-}
+int uart_recv_data(uint8_t *buf, uint16_t max_len, uint32_t timeout_ms);
+
+#endif

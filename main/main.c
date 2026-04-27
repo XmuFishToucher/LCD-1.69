@@ -42,7 +42,7 @@ void app_main(void)
 
     xTaskCreate(uart_receive_task,
                 "uart_rx",
-                4096,
+                8192,
                 NULL,
                 10,
                 NULL);

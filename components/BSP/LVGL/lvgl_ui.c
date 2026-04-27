@@ -5,6 +5,7 @@
 #include "esp_log.h"
 #include "lvgl.h"
 #include "esp_check.h"
+#include "ui_matrix.h"
 
 static const char *TAG = "LVGL_UI";
 
@@ -73,7 +74,10 @@ void app_lvgl_ui_init(void)
     lv_image_set_src(img, &hand_map);
 
     /* 设置位置 */
-    lv_obj_align(img, LV_ALIGN_CENTER, 0, 0);  // 往下15像素
+    lv_obj_align(img, LV_ALIGN_CENTER, 0, 0);
+
+    /* 创建阵点可视化层（覆盖在手图之上） */
+    ui_matrix_create();
 
     /* 解锁 */
     lvgl_port_unlock();

@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <string.h>
 #include "uart.h"
+#include "ui_matrix.h"
+#include "esp_lvgl_port.h"
 
 #define FRAME_SIZE 212
 #define UART_BUF_MAX 1024
@@ -54,6 +56,11 @@ static void parse_udp11(uint8_t *buf)
     }
 
     printf("------------------------\r\n");
+
+    // 更新阵点可视化
+    lvgl_port_lock(0);
+    ui_matrix_update(sensor_value);
+    lvgl_port_unlock();
 }
 
 

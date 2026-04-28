@@ -83,7 +83,7 @@ void ui_matrix_create(void)
            POINT_NUM, grid_w, grid_h, start_x, start_y);
 }
 
-#define VALUE_MIN  400.0f
+#define VALUE_MIN  500.0f
 #define VALUE_MAX  800.0f
 
 void ui_matrix_update(float *data)

@@ -57,10 +57,11 @@ static void parse_udp11(uint8_t *buf)
 
     printf("------------------------\r\n");
 
-    // 更新阵点可视化
-    lvgl_port_lock(0);
-    ui_matrix_update(sensor_value);
-    lvgl_port_unlock();
+    // 更新阵点可视化（锁超时 20ms，避免阻塞收帧；拿不到锁就跳过，等下一帧）
+    if (lvgl_port_lock(pdMS_TO_TICKS(20))) {
+        ui_matrix_update(sensor_value);
+        lvgl_port_unlock();
+    }
 }
 
 
@@ -138,10 +139,20 @@ void uart_receive_task(void *arg)
         
         if (len > 0)
         {
-            // 防溢出
+            // 防溢出：丢弃最老数据，保留最近数据并尝试重新对齐帧头
             if (uart_len + len > UART_BUF_MAX)
             {
-                uart_len = 0;
+                int overflow = (uart_len + len) - UART_BUF_MAX;
+                int head = find_frame_head(uart_buf + overflow, uart_len - overflow);
+                if (head > 0) {
+                    overflow += head;
+                }
+                if (overflow < uart_len) {
+                    memmove(uart_buf, uart_buf + overflow, uart_len - overflow);
+                    uart_len -= overflow;
+                } else {
+                    uart_len = 0;
+                }
             }
 
             memcpy(uart_buf + uart_len, temp_buf, len);

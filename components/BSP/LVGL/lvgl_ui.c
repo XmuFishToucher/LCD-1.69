@@ -11,7 +11,11 @@ static const char *TAG = "LVGL_UI";
 
 static lv_display_t *lvgl_disp = NULL;
 
+#ifdef HAND_RIGHT
+extern const lv_image_dsc_t hand_map_right;
+#else
 extern const lv_image_dsc_t hand_map;
+#endif
 
 static esp_err_t app_lvgl_init(void)
 {
@@ -71,7 +75,11 @@ void app_lvgl_ui_init(void)
     lv_obj_t *img = lv_image_create(scr);
 
     /* 设置图片源 */
+#ifdef HAND_RIGHT
+    lv_image_set_src(img, &hand_map_right);
+#else
     lv_image_set_src(img, &hand_map);
+#endif
 
     /* 设置位置 */
     lv_obj_align(img, LV_ALIGN_CENTER, 0, 0);

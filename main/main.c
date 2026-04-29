@@ -36,15 +36,18 @@ void app_main(void)
     ESP_LOGI(TAG, "UI init done");
 
     usart_init(2000000);
-    vTaskDelay(pdMS_TO_TICKS(1000)); // 等系统稳定
 
-    send_start_cmd();  // ⭐发送启动命令
-
+    /* 先创建接收任务，让它在 uart_read_bytes() 上阻塞等待，
+       确保 start cmd 发出时接收端已就绪 */
     xTaskCreate(uart_receive_task,
                 "uart_rx",
                 8192,
                 NULL,
                 10,
                 NULL);
+
+    vTaskDelay(pdMS_TO_TICKS(100)); // 等接收任务就绪
+
+    send_start_cmd();  // ⭐发送启动命令
 
 }

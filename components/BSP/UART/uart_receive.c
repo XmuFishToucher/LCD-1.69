@@ -3,6 +3,8 @@
 #include "uart.h"
 #include "ui_matrix.h"
 #include "esp_lvgl_port.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #define FRAME_SIZE 212
 #define UART_BUF_MAX 1024
@@ -11,6 +13,7 @@ static uint8_t uart_buf[UART_BUF_MAX];
 static int uart_len = 0;
 
 static float sensor_value[32];
+static TickType_t last_frame_ticks;
 
 // =========================
 // 解析UDP_11
@@ -56,6 +59,8 @@ static void parse_udp11(uint8_t *buf)
     }
 
     printf("------------------------\r\n");
+
+    last_frame_ticks = xTaskGetTickCount();
 
     // 更新阵点可视化（锁超时 20ms，避免阻塞收帧；拿不到锁就跳过，等下一帧）
     if (lvgl_port_lock(pdMS_TO_TICKS(20))) {
@@ -129,14 +134,30 @@ static void parse_uart_buffer()
 // =========================
 // UART任务
 // =========================
+static void resend_start_cmd(void)
+{
+    uint8_t cmd_start[18] = {0};
+    cmd_start[0] = 0xFF;
+    cmd_start[1] = 0xFF;
+    cmd_start[2] = 0x06;
+    cmd_start[3] = 0x09;
+    cmd_start[17] = 0x11;
+    uart_send_data(cmd_start, 18);
+    printf("Start CMD resent (timeout)\r\n");
+}
+
 void uart_receive_task(void *arg)
 {
     uint8_t temp_buf[256];
 
+    // 清空上电噪声，从干净状态开始接收
+    uart_flush_input(USART_UX);
+    last_frame_ticks = xTaskGetTickCount();
+
     while (1)
     {
         int len = uart_recv_data(temp_buf, sizeof(temp_buf), 20);
-        
+
         if (len > 0)
         {
             // 防溢出：丢弃最老数据，保留最近数据并尝试重新对齐帧头
@@ -159,6 +180,12 @@ void uart_receive_task(void *arg)
             uart_len += len;
 
             parse_uart_buffer();
+        }
+
+        // 超时重发：超过 3 秒没收到有效帧，重发启动指令
+        if ((xTaskGetTickCount() - last_frame_ticks) >= pdMS_TO_TICKS(3000)) {
+            resend_start_cmd();
+            last_frame_ticks = xTaskGetTickCount();
         }
     }
 }

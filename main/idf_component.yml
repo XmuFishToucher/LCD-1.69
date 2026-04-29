@@ -17,3 +17,4 @@ dependencies:
   jbrilha/esp_lcd_st7789: ^1.0.2
   lvgl/lvgl: ^9.5.0
   espressif/esp_lvgl_port: ^2.7.2
+  espressif/esp_lcd_touch_cst816s: ^1.1.1~1

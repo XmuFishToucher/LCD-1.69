@@ -14,7 +14,9 @@ set(requires
             esp_adc
             esp_lcd_st7789
             lvgl
-            esp_lvgl_port)
+            esp_lvgl_port
+            esp_lcd_touch
+            esp_lcd_touch_cst816s)
 
 idf_component_register(SRC_DIRS ${src_dirs} INCLUDE_DIRS ${include_dirs} REQUIRES ${requires})
 

@@ -13,6 +13,8 @@ static uint8_t uart_buf[UART_BUF_MAX];
 static int uart_len = 0;
 
 static float sensor_value[32];
+static float raw_value[32];
+static float zero_offset[32];
 static TickType_t last_frame_ticks;
 
 // =========================
@@ -39,6 +41,8 @@ static void parse_udp11(uint8_t *buf)
 
         sensor_value[i] =
             int_part + dec_part / 1000000.0f;
+        raw_value[i] = sensor_value[i];
+        sensor_value[i] -= zero_offset[i];
 
         // 找最大值（后面做电刺激直接用）
         if (sensor_value[i] > max_val)
@@ -144,6 +148,15 @@ static void resend_start_cmd(void)
     cmd_start[17] = 0x11;
     uart_send_data(cmd_start, 18);
     printf("Start CMD resent (timeout)\r\n");
+}
+
+// 调零：将当前 raw_value 记录为各通道零点偏移
+void uart_zero_calibrate(void)
+{
+    for (int i = 0; i < 32; i++) {
+        zero_offset[i] = raw_value[i];
+    }
+    printf("Zero calibrated\r\n");
 }
 
 void uart_receive_task(void *arg)

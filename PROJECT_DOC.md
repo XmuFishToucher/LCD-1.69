@@ -21,10 +21,11 @@ LCD-1.69/
 │       │   └── lcd.c                 # ST7789 SPI 初始化与背光控制
 │       ├── LVGL/
 │       │   ├── lvgl_ui.h             # LVGL UI 配置宏与接口
-│       │   ├── lvgl_ui.c             # LVGL 初始化 + 手部图像显示
+│       │   ├── lvgl_ui.c             # LVGL 初始化 + 触摸 + 手部图像显示
 │       │   ├── ui_matrix.h           # 阵点可视化接口
-│       │   ├── ui_matrix.c           # 8×4 阵点热力图渲染
-│       │   └── hand_map.c            # 手部图像位图数据（约 622KB）
+│       │   ├── ui_matrix.c           # 手掌形状阵点热力图渲染
+│       │   ├── hand_map.c            # 左手位图数据（约 622KB）
+│       │   └── hand_map_right.c      # 右手位图数据（约 622KB）
 │       └── UART/
 │           ├── uart.h                # UART 引脚定义与接口声明
 │           ├── uart.c                # UART 初始化与读写封装
@@ -55,18 +56,30 @@ LCD-1.69/
 | TX   | 34   | UART2 发送 |
 | RX   | 35   | UART2 接收 |
 
+### I2C 触摸接口 (CST816T)
+
+| 引脚 | GPIO | 说明 |
+|------|------|------|
+| SDA  | 17   | I2C 数据 |
+| SCL  | 18   | I2C 时钟 |
+| RST  | NC   | 与 LCD 共用 GPIO15，不复位 |
+| INT  | 16   | 触摸中断 |
+
 ## 软件架构
 
 ### 启动流程
 
 ```
 app_main()
-  ├── app_lvgl_ui_init()          # 初始化 LCD + LVGL + 显示手部图像
+  ├── app_lvgl_ui_init()          # 初始化 LCD + LVGL + 触摸 + 显示 UI
   │     ├── init_lcd_spi()        #   初始化 SPI 总线
   │     ├── init_display()        #   初始化 ST7789 面板 + 点亮背光
   │     └── app_lvgl_init()       #   初始化 LVGL 库 + 注册显示设备
-  │           ├── 创建图像对象，显示 hand_map 位图
-  │           └── ui_matrix_create()  # 在手图上叠加 8×4 阵点层
+  │           ├── app_touch_init()     #   初始化 I2C + CST816T 触摸
+  │           └── lvgl_port_add_touch() #  注册触摸输入设备
+  │           ├── 创建图像对象，显示 hand_map 位图（左右手宏切换）
+  │           ├── ui_matrix_create()  #   在手图上叠加手掌阵点层
+  │           └── 创建 ZERO 调零按钮
   ├── usart_init(2000000)         # 初始化 UART2（2M 波特率）
   ├── xTaskCreate(uart_receive_task)  # 先创建接收任务（确保接收端就绪再发指令）
   ├── vTaskDelay(100ms)           # 等接收任务就绪
@@ -84,6 +97,10 @@ app_main()
 | 双缓冲 | 开启 |
 | DMA 传输 | 开启 |
 | 字节交换 | 开启 |
+| LVGL 任务优先级 | 4 |
+| LVGL 任务栈 | 8192 字节 |
+| LVGL 任务 tick | 5 ms |
+| 触摸设备 | CST816T (I2C addr 0x15) |
 
 ### UART 数据协议
 
@@ -113,8 +130,11 @@ app_main()
 - 后 3 字节：小数部分（大端序，除以 1,000,000）
 
 ```c
-sensor_value[i] = int_part + dec_part / 1000000.0f;
+float raw = int_part + dec_part / 1000000.0f;
+sensor_value[i] = raw - zero_offset[i];
 ```
+
+**调零校准**: 按下屏幕 ZERO 按钮后，当前各通道 raw_value 被记录为 `zero_offset`，后续显示增量值（raw - offset）。
 
 #### 启动指令
 
@@ -168,11 +188,30 @@ sensor_value[i] = int_part + dec_part / 1000000.0f;
 | 网格计算范围 | gx: -1~4（6列）, gy: -3~3（7行）* |
 | 手掌区域 | 4×4 方形均匀网格，整数坐标不动 |
 | 五指区域 | 小数坐标独立调节，代码按区域分段 |
-| 色阶 | 蓝→青→绿→黄→红 |
-| 值域映射 | 固定阈值 [5, 50] → [0, 255] |
+| 色阶 | `#F5E5E5` (浅粉) → `#FF0000` (正红) |
+| 值域映射 | 固定阈值 [500, 800] → [0, 255]（校准后可降低） |
 | 刷新策略 | `lv_obj_set_style` 标记脏区，LVGL 定时任务（5ms 周期）自动刷新 |
+| 滚动条 | 已关闭 `LV_SCROLLBAR_MODE_OFF`（消除圆点边缘横杠） |
 
 > *实际五指坐标超出此范围（gx 可达 -3.3~4.8，gy 可达 -5.55），超出部分会被裁剪到屏幕外。
+
+### 左右手模式切换
+
+在 [lvgl_ui.h](components/BSP/LVGL/lvgl_ui.h) 中通过宏切换：
+
+```c
+// #define HAND_RIGHT  // 注释 = 左手，取消注释 = 右手
+```
+
+| 模式 | 位图源 | 阵点 gx 坐标 |
+|------|--------|-------------|
+| 左手 (默认) | `hand_map` | 原始坐标（已调试） |
+| 右手 | `hand_map_right` | 镜像 `gx = 3.0f - gx`（绕手掌中心水平翻转） |
+
+右手模式切换内容：
+- `lvgl_ui.c`: 条件使用 `hand_map_right` 位图
+- `ui_matrix.c`: 条件使用右手 `points[]` 数组（gx 已镜像，通道号待手动调整）
+- `origin_x` 反向偏移（左手 +20，右手 -20）适应拇指位置
 
 ## 依赖项
 
@@ -182,6 +221,7 @@ sensor_value[i] = int_part + dec_part / 1000000.0f;
 | lvgl/lvgl | ^9.5.0 | LVGL 图形库 |
 | espressif/esp_lvgl_port | ^2.7.2 | ESP LVGL 端口层 |
 | jbrilha/esp_lcd_st7789 | ^1.0.2 | ST7789 驱动 |
+| espressif/esp_lcd_touch_cst816s | ^1.1.1~1 | CST816S 触摸驱动 |
 
 ## 构建优化
 
@@ -200,6 +240,10 @@ BSP 组件编译选项：
 6. **UART 任务栈**: 分配 8192 字节，避免 LVGL 操作导致栈溢出；不应在非 LVGL 任务中调用 `lv_refr_now()`
 7. **启动时序**: 接收任务先于启动指令创建，确保指令回复不丢失；任务启动时清空 UART 驱动层缓冲区
 8. **超时重发**: 若连续 3 秒未收到有效数据帧，自动重发启动指令唤醒外部设备
+9. **触摸输入**: CST816T 通过 I2C (GPIO17/18) 连接到 LVGL，RST 与 LCD 共用 GPIO15
+10. **调零校准**: 屏幕右下角 ZERO 按钮（70×40），按下后将当前各通道 raw_value 记录为零点偏移，后续显示 `sensor = raw - offset`
+11. **数据校准流程**: `parse_udp11()` 中先计算原始值保存到 `raw_value[]`，再减去 `zero_offset[]` 得到 `sensor_value[]`，最后传入 `ui_matrix_update()`
+12. **LVGL 任务栈**: 8192 字节（自 4096 扩大），承载触摸事件处理、按钮回调、printf 等调用链
 
 ## 已知问题与修复记录
 
@@ -241,3 +285,35 @@ BSP 组件编译选项：
 - 手掌 4×4 方形区域保持整数坐标不动
 - 五指区域独立分组，各使用小数坐标微调至对应物理位置
 - 代码按 `手掌/拇指/食指/中指/无名指/小指侧` 分段，修改时互不影响
+
+### 修复 5：左右手模式宏切换（2026-04-29）
+
+**背景**: 左手布局调试完毕，需支持右手贴片布局
+
+**改动**:
+- [lvgl_ui.h](components/BSP/LVGL/lvgl_ui.h#L11) — 新增 `HAND_RIGHT` 宏（默认注释，左手模式）
+- [hand_map_right.c](components/BSP/LVGL/hand_map_right.c) — 符号重命名为 `hand_map_right`
+- [lvgl_ui.c](components/BSP/LVGL/lvgl_ui.c) — `#ifdef` 条件选择位图源
+- [ui_matrix.c](components/BSP/LVGL/ui_matrix.c#L19-L119) — 双 `points[]` 数组，右手 gx 坐标镜像 `3.0f - gx`，`origin_x` 反向偏移
+- [ui_matrix.h](components/BSP/LVGL/ui_matrix.h#L4) — 添加 `#include "lvgl_ui.h"` 使宏可见
+
+### 新增 1：CST816T 触摸 + 调零按钮（2026-04-29）
+
+**内容**:
+- 添加 `espressif/esp_lcd_touch_cst816s` 依赖
+- [lvgl_ui.c](components/BSP/LVGL/lvgl_ui.c) — I2C 初始化 + CST816S 触摸注册 + 右下角 ZERO 调零按钮
+- [uart_receive.c](components/BSP/UART/uart_receive.c) — 新增 `raw_value[32]` / `zero_offset[32]`，`uart_zero_calibrate()` 校准函数
+- [uart_receive.h](components/BSP/UART/uart_receive.h) — 导出 `uart_zero_calibrate()`
+
+### 修复 6：ZERO 按钮间歇性重启（2026-04-29）
+
+**现象**: 点击 ZERO 按钮有时正常有时系统重启
+
+**根因**: LVGL 任务栈 4096 字节不足，触摸事件 + 按钮回调 + `printf()` 峰值栈超限
+
+**修复**: [lvgl_ui.c](components/BSP/LVGL/lvgl_ui.c#L67) — 任务栈 4096 → 8192
+
+### 优化 1：热力图色阶（2026-04-29）
+
+- 色阶从蓝→青→绿→黄→红改为 `#F5E5E5` (浅粉) → `#FF0000` (正红) 单色渐变
+- 圆点停用滚动条 `LV_SCROLLBAR_MODE_OFF` 消除 9/12 点钟方向横杠

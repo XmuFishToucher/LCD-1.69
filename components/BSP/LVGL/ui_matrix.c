@@ -124,25 +124,10 @@ static lv_color_t heatmap_color(uint8_t intensity)
 {
     float t = intensity / 255.0f;
 
-    uint8_t r, g, b;
-
-    if (t < 0.25f) {
-        r = 0;
-        g = (uint8_t)(t / 0.25f * 255);
-        b = 255;
-    } else if (t < 0.5f) {
-        r = 0;
-        g = 255;
-        b = (uint8_t)((1.0f - (t - 0.25f) / 0.25f) * 255);
-    } else if (t < 0.75f) {
-        r = (uint8_t)((t - 0.5f) / 0.25f * 255);
-        g = 255;
-        b = 0;
-    } else {
-        r = 255;
-        g = (uint8_t)((1.0f - (t - 0.75f) / 0.25f) * 255);
-        b = 0;
-    }
+    // 从 #F5E5E5 (浅粉) 渐变到 #FF0000 (正红)
+    uint8_t r = (uint8_t)(245 + t * 10);
+    uint8_t g = (uint8_t)(229 * (1.0f - t));
+    uint8_t b = (uint8_t)(229 * (1.0f - t));
 
     return lv_color_make(r, g, b);
 }
@@ -186,6 +171,7 @@ void ui_matrix_create(void)
         lv_obj_set_style_border_width(obj, 0, 0);
         lv_obj_set_style_shadow_width(obj, 0, 0);
         lv_obj_set_style_outline_width(obj, 0, 0);
+        lv_obj_set_scrollbar_mode(obj, LV_SCROLLBAR_MODE_OFF);
 
         lv_obj_move_foreground(obj);
 

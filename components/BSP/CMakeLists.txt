@@ -1,17 +1,22 @@
 set(src_dirs
             LCD
             UART
-            LVGL)
+            LVGL
+            Stim)
 
 set(include_dirs
             LCD
             UART
-            LVGL)
+            LVGL
+            Stim)
 
 set(requires
             driver
+            esp_driver_gpio
             esp_timer
             esp_adc
+            esp_rom
+            log
             esp_lcd_st7789
             lvgl
             esp_lvgl_port

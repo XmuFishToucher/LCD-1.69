@@ -1,319 +1,471 @@
 # LCD-1.69 项目文档
 
+更新日期：2026-05-06
+
 ## 项目概述
 
-基于 ESP-IDF 的嵌入式 GUI 项目，使用 ST7789 驱动 1.69 英寸 LCD 屏幕（240×280），通过 LVGL v9 显示手部图像，UART 接收外部传感器数据，并以热力图阵点实时可视化压力分布。
+本项目是基于 ESP-IDF 5.3.3 和 ESP32-S3 的嵌入式触觉显示与电刺激反馈工程。系统使用 ST7789 驱动 1.69 英寸 240x280 LCD，通过 LVGL v9 显示手部位图和实时压力热力点；通过 UART2 接收外部 32 路压力传感器数据；通过 HV2801、DAC80502 和电位器 ADC 实现对应点位的电刺激反馈。
+
+当前项目以右手模式为有效基线，`HAND_RIGHT` 已开启。右手通道映射已确认正确；左手分支暂未维护，后续如需使用应重新校准。
 
 ## 项目结构
 
-```
+```text
 LCD-1.69/
-├── CMakeLists.txt                    # 根构建配置
+├── CMakeLists.txt
+├── dependencies.lock
 ├── main/
 │   ├── CMakeLists.txt
-│   ├── idf_component.yml             # 依赖声明
-│   └── main.c                        # 应用入口
+│   ├── idf_component.yml
+│   └── main.c
 ├── components/
 │   └── BSP/
-│       ├── CMakeLists.txt            # BSP 组件构建配置
+│       ├── CMakeLists.txt
 │       ├── LCD/
-│       │   ├── lcd.h                 # LCD 引脚定义与接口声明
-│       │   └── lcd.c                 # ST7789 SPI 初始化与背光控制
+│       │   ├── lcd.h
+│       │   └── lcd.c
 │       ├── LVGL/
-│       │   ├── lvgl_ui.h             # LVGL UI 配置宏与接口
-│       │   ├── lvgl_ui.c             # LVGL 初始化 + 触摸 + 手部图像显示
-│       │   ├── ui_matrix.h           # 阵点可视化接口
-│       │   ├── ui_matrix.c           # 手掌形状阵点热力图渲染
-│       │   ├── hand_map.c            # 左手位图数据（约 622KB）
-│       │   └── hand_map_right.c      # 右手位图数据（约 622KB）
-│       └── UART/
-│           ├── uart.h                # UART 引脚定义与接口声明
-│           ├── uart.c                # UART 初始化与读写封装
-│           ├── uart_receive.h        # 接收任务接口
-│           └── uart_receive.c        # 传感器数据帧解析
-├── managed_components/               # ESP-IDF 组件管理器依赖（未纳入版本控制）
-└── sdkconfig                         # ESP-IDF 项目配置
+│       │   ├── lvgl_ui.h
+│       │   ├── lvgl_ui.c
+│       │   ├── ui_matrix.h
+│       │   ├── ui_matrix.c
+│       │   ├── hand_map.c
+│       │   └── hand_map_right.c
+│       ├── UART/
+│       │   ├── uart.h
+│       │   ├── uart.c
+│       │   ├── uart_receive.h
+│       │   └── uart_receive.c
+│       └── Stim/
+│           ├── stim.h
+│           ├── stim.c
+│           ├── dac80502.h
+│           ├── dac80502.c
+│           ├── stim_adc.h
+│           └── stim_adc.c
+├── managed_components/
+├── partitions.csv
+└── sdkconfig
 ```
 
-## 硬件引脚定义
+## 硬件连接
 
-### SPI LCD 接口
+### LCD: ST7789
 
-| 引脚 | GPIO | 说明 |
+| 信号 | GPIO | 说明 |
 |------|------|------|
-| CLK  | 13   | SPI 时钟 |
-| MOSI | 14   | SPI 数据输出 |
-| MISO | -    | 未使用 |
-| DC   | 11   | 数据/命令选择 |
-| CS   | 12   | 片选 |
-| RST  | 15   | 复位 |
-| BLK  | 10   | 背光控制（高电平点亮） |
+| CLK | GPIO13 | SPI 时钟 |
+| MOSI | GPIO14 | SPI 数据输出 |
+| MISO | - | 未使用 |
+| DC | GPIO11 | 数据/命令选择 |
+| CS | GPIO12 | 片选 |
+| RST | GPIO15 | 复位 |
+| BLK | GPIO10 | 背光控制，高电平点亮 |
 
-### UART 接口
+LCD 使用 `SPI2_HOST`，像素时钟当前设置为 60 MHz。
 
-| 引脚 | GPIO | 说明 |
+### 触摸: CST816S/CST816T
+
+| 信号 | GPIO | 说明 |
 |------|------|------|
-| TX   | 34   | UART2 发送 |
-| RX   | 35   | UART2 接收 |
+| SDA | GPIO17 | I2C 数据 |
+| SCL | GPIO18 | I2C 时钟 |
+| INT | GPIO16 | 触摸中断 |
+| RST | NC | 当前不单独复位，LCD RST 使用 GPIO15 |
 
-### I2C 触摸接口 (CST816T)
+触摸注册到 LVGL 输入设备，用于 ZERO 调零按钮和 STIM 开关。
 
-| 引脚 | GPIO | 说明 |
+### UART2 传感器数据
+
+| 信号 | GPIO | 说明 |
 |------|------|------|
-| SDA  | 17   | I2C 数据 |
-| SCL  | 18   | I2C 时钟 |
-| RST  | NC   | 与 LCD 共用 GPIO15，不复位 |
-| INT  | 16   | 触摸中断 |
+| TX | GPIO34 | UART2 发送 |
+| RX | GPIO35 | UART2 接收 |
+
+UART 参数：
+
+- 波特率：2,000,000 bps
+- 数据位：8
+- 停止位：1
+- 校验：无
+- 流控：无
+
+### HV2801 电刺激通道选择
+
+HV2801 引出 32 个输出通道，当前按完整 32 bit mask 移位输出。硬件通道号与传感器通道号一致：
+
+```c
+stim_ch = sensor_ch;
+mask = 1UL << stim_ch;
+```
+
+| 信号 | GPIO | 说明 |
+|------|------|------|
+| HV_CLR | GPIO40 | MTDO |
+| HV_CS | GPIO39 | MTCK |
+| HV_CLK | GPIO38 | 移位时钟 |
+| HV_DIN | GPIO37 | 数据输入 |
+| HV_DOUT | GPIO36 | 数据输出/读回，当前仅配置为输入 |
+
+### DAC80502 电流幅值控制
+
+DAC80502 通过 GPIO 模拟 24 bit SPI，参考 STM32 项目 `H723_ALL_IN_ONE` 的实现方式。
+
+| 信号 | 原理图网络 | GPIO | 说明 |
+|------|------------|------|------|
+| SCK | SPICLK_P | GPIO47 | DAC 时钟 |
+| MOSI | SPICLK_N | GPIO48 | DAC 数据输入 |
+| CS/SYNC | SPICS1 | GPIO26 | DAC 片选/同步 |
+
+DAC80502 当前初始化行为：
+
+- GAIN 寄存器 `0x04` 写入 `0x0103`
+- DAC A 输出 `600 mV`，作为空闲电流镜控制电压
+- DAC B 输出 `52 mV`，按参考项目保留
+
+### 电位器 ADC
+
+| 信号 | GPIO | ADC |
+|------|------|-----|
+| 电位器输出 | GPIO3 | ADC_UNIT_1 / ADC_CHANNEL_2 |
+
+当前使用 ESP-IDF oneshot ADC，12 dB 衰减。ADC raw 值按 `0~4095` 映射为 `sensitive 0~10`，用于控制刺激脉宽。
 
 ## 软件架构
 
 ### 启动流程
 
-```
+```text
 app_main()
-  ├── app_lvgl_ui_init()          # 初始化 LCD + LVGL + 触摸 + 显示 UI
-  │     ├── init_lcd_spi()        #   初始化 SPI 总线
-  │     ├── init_display()        #   初始化 ST7789 面板 + 点亮背光
-  │     └── app_lvgl_init()       #   初始化 LVGL 库 + 注册显示设备
-  │           ├── app_touch_init()     #   初始化 I2C + CST816T 触摸
-  │           └── lvgl_port_add_touch() #  注册触摸输入设备
-  │           ├── 创建图像对象，显示 hand_map 位图（左右手宏切换）
-  │           ├── ui_matrix_create()  #   在手图上叠加手掌阵点层
-  │           └── 创建 ZERO 调零按钮
-  ├── usart_init(2000000)         # 初始化 UART2（2M 波特率）
-  ├── xTaskCreate(uart_receive_task)  # 先创建接收任务（确保接收端就绪再发指令）
-  ├── vTaskDelay(100ms)           # 等接收任务就绪
-  └── send_start_cmd()            # 发送启动指令给外部设备
+  ├── stim_init()
+  │   ├── 初始化 HV2801 GPIO
+  │   ├── dac80502_init()
+  │   └── stim_adc_init()
+  ├── app_lvgl_ui_init()
+  │   ├── init_lcd_spi()
+  │   ├── init_display()
+  │   ├── app_lvgl_init()
+  │   ├── 创建手部位图
+  │   ├── ui_matrix_create()
+  │   ├── 创建 ZERO 按钮
+  │   └── 创建 STIM 开关
+  ├── usart_init(2000000)
+  ├── xTaskCreate(stim_task)
+  ├── xTaskCreate(uart_receive_task)
+  ├── vTaskDelay(100ms)
+  └── send_start_cmd()
 ```
 
-### LVGL 显示配置
+### 任务分工
+
+| 任务/模块 | 职责 |
+|----------|------|
+| LVGL port task | 屏幕刷新和触摸事件处理 |
+| `uart_receive_task` | 接收 UART 数据帧、解析 32 路传感器数据、刷新 UI 数据源 |
+| `stim_task` | 按 25 Hz 周期执行电刺激脉冲输出 |
+| `ui_matrix` | 在手图上渲染 29 个压力热力点 |
+| `Stim` | 保存最新刺激目标、控制 HV2801/DAC80502/ADC |
+
+### 数据流
+
+```text
+外部传感器设备
+  -> UART2 数据帧
+  -> parse_udp11()
+  -> raw_value[32]
+  -> zero_offset[32]
+  -> sensor_value[32]
+       ├── ui_matrix_update(sensor_value)
+       └── stim_update(sensor_value)
+              -> stim_task()
+                   ├── DAC80502 设置电流幅值
+                   ├── HV2801 打开最大压力通道
+                   └── 按 ADC 电位器脉宽关闭通道
+```
+
+## LVGL 显示
 
 | 参数 | 值 |
 |------|-----|
-| 水平分辨率 | 240 px |
-| 垂直分辨率 | 280 px |
-| 色彩格式 | RGB565 (16-bit) |
+| 分辨率 | 240 x 280 |
+| 色彩格式 | RGB565 |
 | 绘制缓冲区高度 | 70 行 |
 | 双缓冲 | 开启 |
-| DMA 传输 | 开启 |
-| 字节交换 | 开启 |
+| DMA buffer | 开启 |
+| RGB565 字节交换 | 开启 |
 | LVGL 任务优先级 | 4 |
 | LVGL 任务栈 | 8192 字节 |
-| LVGL 任务 tick | 5 ms |
-| 触摸设备 | CST816T (I2C addr 0x15) |
+| LVGL tick | 5 ms |
+| 触摸设备 | CST816S/CST816T |
 
-### UART 数据协议
+当前 UI 元素：
 
-- **波特率**: 2,000,000 bps
-- **数据位**: 8
-- **停止位**: 1
-- **校验**: 无
-- **流控**: 无
+- 居中手部位图：由 `HAND_RIGHT` 宏选择 `hand_map_right` 或 `hand_map`
+- 手部热力点：由 `ui_matrix_create()` 创建
+- ZERO 按钮：右下角，点击后记录当前 `raw_value[32]` 为零点偏移
+- STIM 开关：左下角，上电默认关闭，打开后才允许电刺激输出
 
-#### 帧格式
+## UART 数据协议
+
+### 帧格式
 
 | 字段 | 偏移 | 长度 | 说明 |
 |------|------|------|------|
 | 帧头 | 0 | 2 字节 | 固定 `0xFF 0xFF` |
-| ... | 2 | 14 字节 | 未使用 |
+| 保留 | 2 | 14 字节 | 当前未使用 |
 | 协议标识 | 16 | 2 字节 | UDP_11 = `0x00 0x12` |
-| ... | 18 | 2 字节 | 未使用 |
+| 保留 | 18 | 2 字节 | 当前未使用 |
 | 传感器数据 | 20 | 192 字节 | 32 个传感器值，每值 6 字节 |
-| ... | 212 | ... | 帧尾 |
 
-帧总长: **212 字节**
+帧总长：212 字节。
 
-#### 传感器数据编码
+### 传感器值编码
 
 每个传感器值占 6 字节：
-- 前 3 字节：整数部分（大端序）
-- 后 3 字节：小数部分（大端序，除以 1,000,000）
+
+- 前 3 字节：整数部分，大端序
+- 后 3 字节：小数部分，大端序，除以 1,000,000
 
 ```c
 float raw = int_part + dec_part / 1000000.0f;
 sensor_value[i] = raw - zero_offset[i];
 ```
 
-**调零校准**: 按下屏幕 ZERO 按钮后，当前各通道 raw_value 被记录为 `zero_offset`，后续显示增量值（raw - offset）。
-
-#### 启动指令
+### 启动指令
 
 18 字节固定指令：
-- `[0..3]`: `0xFF 0xFF 0x06 0x09`
-- `[4..16]`: `0x00`（保留）
-- `[17]`: `0x11`
 
-#### 帧同步策略
-
-1. 循环缓冲区（1024 字节）累积数据
-2. 搜索帧头 `0xFF 0xFF`
-3. 不足 212 字节时等待更多数据
-4. 验证协议标识（偏移 16-17）
-5. 匹配成功则解析 32 个传感器 float 值
-6. 调用 `ui_matrix_update()` 刷新阵点热力图
-7. 匹配失败则丢弃 1 字节，重新搜索帧头
-8. 缓冲区溢出时保留最近数据并尝试对齐帧头，而非清空全部
-9. 启动时清空 UART 驱动层缓冲区，排除上电噪声
-10. 超过 3 秒未收到有效帧则自动重发启动指令
-
-### 阵点可视化（ui_matrix）
-
-在 hand_map 手图之上叠加 29 个彩色圆点（通道 20-22 未使用），通过热力图色阶实时反映传感器压力值。
-
-**坐标系统**: `gx`/`gy` 为 `float` 类型（支持小数精细调节），cell = 20px（16px 圆点 + 4px 间距），实际画布坐标 = `origin + (gx/gx - min) * cell`。
-
-**阵点物理布局**（手掌形状，已按实际位置微调）：
-
+```text
+[0..3]  = FF FF 06 09
+[4..16] = 00
+[17]    = 11
 ```
-        手掌 (4×4 方形，整数坐标):
-        ch2(0,0)   ch15(1,0)   ch19(2,0)   ch28(3,0)
-        ch3(0,1)   ch8 (1,1)   ch18(2,1)   ch27(3,1)
-        ch4(0,2)   ch9 (1,2)   ch17(2,2)   ch26(3,2)
-        ch5(0,3)   ch10(1,3)   ch16(2,3)   ch25(3,3)
 
-        五指 (小数坐标，已微调):
-        拇指:       ch7(-3.30, 0)   ch6(-2.20, 1)
-        食指:       ch1(-1.00, -4.70)  ch0(-0.80, -3.15)  ch11(-0.60, -1.90)
-        中指:       ch14(1.35, -5.55)   ch13(1.15, -3.85)   ch12(1.10, -2.45)
-        无名指:     ch31(2.95, -4.70)   ch30(2.65, -3.20)   ch29(2.50, -2.00)
-        小指侧:     ch23(4.80, -3.00)   ch24(4.40, -1.50)
-```
+### 帧同步策略
+
+1. 使用 1024 字节缓冲区累积 UART 数据。
+2. 搜索帧头 `0xFF 0xFF`。
+3. 不足 212 字节时等待更多数据。
+4. 检查偏移 16/17 的协议标识。
+5. 匹配成功则解析 32 个传感器值。
+6. 匹配失败则丢弃 1 字节并重新搜索。
+7. 缓冲区溢出时保留最近数据，并尝试重新对齐帧头。
+8. 启动时清空 UART 驱动层缓冲区，排除上电噪声。
+9. 超过 3 秒未收到有效帧时自动重发启动指令。
+
+## 阵点可视化
+
+`ui_matrix.c` 在手部位图上叠加 29 个圆点。当前有效模式是右手模式；右手通道映射已经确认正确。
+
+### 左手布局说明
+
+左手分支保留历史布局，当前暂未维护。文档中旧的“通道 20/21/22 未使用”主要描述左手/旧布局，不作为右手模式判断依据。
+
+### 热力图参数
 
 | 参数 | 值 |
 |------|-----|
-| 通道数 | 29（原 32 通道，去除 20,21,22） |
-| 坐标类型 | `float`（支持 0.5 格精细偏移） |
-| 圆点直径 | 16 px |
-| 圆点间距 | 4 px |
-| 网格计算范围 | gx: -1~4（6列）, gy: -3~3（7行）* |
-| 手掌区域 | 4×4 方形均匀网格，整数坐标不动 |
-| 五指区域 | 小数坐标独立调节，代码按区域分段 |
-| 色阶 | `#F5E5E5` (浅粉) → `#FF0000` (正红) |
-| 值域映射 | 固定阈值 [500, 800] → [0, 255]（校准后可降低） |
-| 刷新策略 | `lv_obj_set_style` 标记脏区，LVGL 定时任务（5ms 周期）自动刷新 |
-| 滚动条 | 已关闭 `LV_SCROLLBAR_MODE_OFF`（消除圆点边缘横杠） |
+| 显示点数 | 29 |
+| 点直径 | 16 px |
+| 点间距 | 4 px |
+| 坐标类型 | `float` |
+| 色阶 | `#F5E5E5` 浅粉 -> `#FF0000` 正红 |
+| 显示阈值 | `500~800` 映射到 `0~255` |
+| 滚动条 | `LV_SCROLLBAR_MODE_OFF` |
 
-> *实际五指坐标超出此范围（gx 可达 -3.3~4.8，gy 可达 -5.55），超出部分会被裁剪到屏幕外。
+## 电刺激实现
 
-### 左右手模式切换
+### 控制原则
 
-在 [lvgl_ui.h](components/BSP/LVGL/lvgl_ui.h) 中通过宏切换：
+当前电刺激遵循参考项目 `H723_ALL_IN_ONE` 的方式：
+
+- HV2801 只负责通道选择
+- DAC80502 控制电流镜输入电压，即电流幅值
+- GPIO3 电位器 ADC 控制刺激脉宽
+- 传感器最大压力点决定刺激通道和 DAC 幅值
+
+### 压力到 DAC 幅值
+
+当前参数位于 `components/BSP/Stim/stim.c`：
 
 ```c
-// #define HAND_RIGHT  // 注释 = 左手，取消注释 = 右手
+#define STIM_PRESSURE_MIN 500.0f
+#define STIM_PRESSURE_MAX 800.0f
+#define STIM_DAC_IDLE_MV 600
+#define STIM_DAC_MIN_MV 650
+#define STIM_DAC_MAX_MV 1050
 ```
 
-| 模式 | 位图源 | 阵点 gx 坐标 |
-|------|--------|-------------|
-| 左手 (默认) | `hand_map` | 原始坐标（已调试） |
-| 右手 | `hand_map_right` | 镜像 `gx = 3.0f - gx`（绕手掌中心水平翻转） |
+映射关系：
 
-右手模式切换内容：
-- `lvgl_ui.c`: 条件使用 `hand_map_right` 位图
-- `ui_matrix.c`: 条件使用右手 `points[]` 数组（gx 已镜像，通道号待手动调整）
-- `origin_x` 反向偏移（左手 +20，右手 -20）适应拇指位置
+```text
+sensor <= 500      -> 无效刺激，DAC A = 600 mV
+500 < sensor < 800 -> DAC A = 650~1050 mV 线性映射
+sensor >= 800      -> DAC A = 1050 mV
+```
+
+如实际体感过强，应优先降低 `STIM_DAC_MAX_MV`。
+
+### 电位器到脉宽
+
+当前 ADC 映射：
+
+```text
+GPIO3 ADC raw 0~4095 -> sensitive 0~10
+pulse_width_us = sensitive * 100 us
+```
+
+因此脉宽范围约为 `0~1000 us`。如果旋钮方向与预期相反，可在 `stim_adc_get_sensitive()` 中改为：
+
+```c
+sensitive = 10 - sensitive;
+```
+
+### 刺激时序
+
+当前刺激频率约为 25 Hz：
+
+```c
+#define STIM_PERIOD_MS 40
+```
+
+每个 40 ms 周期：
+
+1. 读取电位器 ADC，得到 `pulse_width_us`。
+2. 如果 STIM 开关关闭、压力无效或脉宽为 0，则 HV2801 全关，DAC A 保持 600 mV。
+3. 如果有效，则设置 DAC A 电压。
+4. 打开最大压力通道。
+5. 延时 `pulse_width_us`。
+6. 关闭所有 HV2801 通道。
+
+`stim_update()` 不直接输出刺激，只保存最新目标通道和 DAC 电压；实际 GPIO 操作由 `stim_task()` 执行。
 
 ## 依赖项
 
-| 依赖 | 版本 | 说明 |
-|------|------|------|
-| ESP-IDF | >= 4.1.0 | 框架 |
-| lvgl/lvgl | ^9.5.0 | LVGL 图形库 |
-| espressif/esp_lvgl_port | ^2.7.2 | ESP LVGL 端口层 |
-| jbrilha/esp_lcd_st7789 | ^1.0.2 | ST7789 驱动 |
-| espressif/esp_lcd_touch_cst816s | ^1.1.1~1 | CST816S 触摸驱动 |
+`main/idf_component.yml` 直接依赖：
 
-## 构建优化
+| 依赖 | 版本 |
+|------|------|
+| ESP-IDF | 5.3.3（lock 文件记录） |
+| `lvgl/lvgl` | 9.5.0 |
+| `espressif/esp_lvgl_port` | 2.7.2 |
+| `jbrilha/esp_lcd_st7789` | 1.0.2 |
+| `espressif/esp_lcd_touch_cst816s` | 1.1.1~1 |
 
-BSP 组件编译选项：
-- `-ffast-math` — 浮点运算优化
-- `-O3` — 最高等级优化
-- `-Wno-error=format` / `-Wno-format` — 忽略格式警告
+BSP 组件 CMake 显式依赖：
 
-## 关键行为说明
+```cmake
+driver
+esp_driver_gpio
+esp_timer
+esp_adc
+esp_rom
+log
+esp_lcd_st7789
+lvgl
+esp_lvgl_port
+esp_lcd_touch
+esp_lcd_touch_cst816s
+```
 
-1. **背光控制**: LCD 初始化时自动点亮背光，提供 `lcd_backlight_on/off/set` 接口手动控制
-2. **镜像显示**: 面板配置了水平+垂直镜像翻转（`mirror(true, true)`）
-3. **色序反转**: ST7789 需要反转颜色输出
-4. **垂直间隙**: 面板底部留 20 行间隙（`set_gap(0, 20)`），适配 240×280 分辨率
-5. **LVGL 线程安全**: UI 操作需通过 `lvgl_port_lock(pdMS_TO_TICKS(20))` 加锁，锁超时 20ms，拿不到锁则跳过本次更新等待下一帧；旧代码使用 `timeout=0` 存在竞态
-6. **UART 任务栈**: 分配 8192 字节，避免 LVGL 操作导致栈溢出；不应在非 LVGL 任务中调用 `lv_refr_now()`
-7. **启动时序**: 接收任务先于启动指令创建，确保指令回复不丢失；任务启动时清空 UART 驱动层缓冲区
-8. **超时重发**: 若连续 3 秒未收到有效数据帧，自动重发启动指令唤醒外部设备
-9. **触摸输入**: CST816T 通过 I2C (GPIO17/18) 连接到 LVGL，RST 与 LCD 共用 GPIO15
-10. **调零校准**: 屏幕右下角 ZERO 按钮（70×40），按下后将当前各通道 raw_value 记录为零点偏移，后续显示 `sensor = raw - offset`
-11. **数据校准流程**: `parse_udp11()` 中先计算原始值保存到 `raw_value[]`，再减去 `zero_offset[]` 得到 `sensor_value[]`，最后传入 `ui_matrix_update()`
-12. **LVGL 任务栈**: 8192 字节（自 4096 扩大），承载触摸事件处理、按钮回调、printf 等调用链
+## 构建与运行
 
-## 已知问题与修复记录
+在 ESP-IDF 5.3.3 终端中执行：
 
-### 修复 1：缓冲区溢出清空导致帧错位（2026-04-29）
+```powershell
+idf.py build
+idf.py flash monitor
+```
 
-**现象**: 传感器数据偶尔出现异常大值（百万级），大部分帧正常但个别帧后半段数据异常
+当前普通 PowerShell 环境中 `idf.py` 不在 PATH 内，因此在非 ESP-IDF 终端无法完成本地编译验证。
 
-**根因**: UART 消费速度跟不上接收速度时，`uart_len + len > 1024` 触发 `uart_len = 0` 直接丢弃全部缓冲数据。下一批数据进来后可能从非帧头位置开始解析，导致读取到错误偏移的字节
+## 测试建议
 
-**修复**: [uart_receive.c](components/BSP/UART/uart_receive.c#L164-L176) — 溢出时仅丢弃最老的数据腾出空间，并尝试在溢出位置附近搜索帧头重新对齐，保留最近的有效数据
+### 编译检查
 
-### 修复 2：LVGL 锁竞态（2026-04-29）
+1. 使用 ESP-IDF 终端运行 `idf.py build`。
+2. 若 CMake 报组件解析错误，优先检查 `components/BSP/CMakeLists.txt` 的 `REQUIRES`。
+3. 若 GPIO47/GPIO48 报错，确认 `sdkconfig` 目标为 `esp32s3`。
 
-**现象**: LVGL 渲染期间，UART 任务可能在未持有锁的情况下操作 UI 对象，导致显示异常或崩溃
+### 无负载电气测试
 
-**修复**: [uart_receive.c](components/BSP/UART/uart_receive.c#L66) — `lvgl_port_lock(0)` 改为 `lvgl_port_lock(pdMS_TO_TICKS(20))`，增加返回值检查，拿不到锁则安全跳过本次更新
+不要先接人体。建议先用示波器或逻辑分析仪确认：
 
-### 修复 3：显示屏偶尔无法接收数据（2026-04-29）
+- HV2801 `CLR/CS/CLK/DIN` 有正确 32 bit 时序
+- `stim_open_ch(0)` 对应 bit0，`stim_open_ch(31)` 对应 bit31
+- DAC80502 SCK/MOSI/SYNC 有 24 bit 写寄存器时序
+- DAC A 空闲为 600 mV
+- 压力升高时 DAC A 在 650~1050 mV 之间变化
+- GPIO3 电位器 raw 值随旋钮变化，方向符合预期
 
-**现象**: 上电后偶尔不显示数据，需重启几次才正常
+### 假负载测试
 
-**根因**:
-- UART 比接收任务早初始化，RX 脚浮空产生的噪声字节填充驱动缓冲区
-- 启动指令在接收任务创建前发送，外部设备响应数据到达时无人读取
-- 无超时重试，若启动指令丢失则永远收不到数据
+1. STIM 开关保持关闭，确认 HV2801 全关、DAC A 约 600 mV。
+2. 打开 STIM，输入一个超过阈值的传感器通道。
+3. 确认只打开最大压力对应通道。
+4. 调节电位器，确认脉宽从 0 到约 1000 us 变化。
+5. 降低压力到阈值以下，确认 HV2801 全关、DAC A 回到 600 mV。
 
-**修复**:
-- [main.c](main/main.c#L29-L53) — 先创建接收任务再发送启动指令，确保接收端就绪
-- [uart_receive.c](components/BSP/UART/uart_receive.c#L154) — 任务启动时 `uart_flush_input()` 清空上电噪声
-- [uart_receive.c](components/BSP/UART/uart_receive.c#L186-L189) — 3 秒无数据自动重发启动指令
+### 人体测试注意
 
-### 修复 4：阵点布局重构为手掌形状（2026-04-29）
+人体测试前必须先确认假负载结果。初次人体测试建议：
 
-**背景**: 原 8×4 矩形网格与实际传感器物理布局（手掌形状）不匹配
+- 将电位器调到最小脉宽
+- 必要时先降低 `STIM_DAC_MAX_MV`
+- 单点、短时间测试
+- 保持 STIM 开关可随时关闭
 
-**改动**:
-- 通道数从 32 减至 29（去除 ch20-22）
-- `gx`/`gy` 从 `int8_t` 改为 `float`，支持半格精细偏移
-- 手掌 4×4 方形区域保持整数坐标不动
-- 五指区域独立分组，各使用小数坐标微调至对应物理位置
-- 代码按 `手掌/拇指/食指/中指/无名指/小指侧` 分段，修改时互不影响
+## 已知限制与待验证项
 
-### 修复 5：左右手模式宏切换（2026-04-29）
+- 当前未在本会话中完成 `idf.py build`，原因是普通 PowerShell 找不到 `idf.py`。
+- DAC80502 的 GPIO 模拟 SPI 时序来自参考项目，需在实物上确认。
+- GPIO3 ADC 当前未做电压校准，仅用于 0~10 档位映射。
+- `HV_DOUT` 当前未用于移位链读回诊断。
+- 左手模式暂未维护。
+- 当前 `README.md` 仍是 ESP-IDF 示例模板，建议后续用本文档内容更新。
 
-**背景**: 左手布局调试完毕，需支持右手贴片布局
+## 历史修复记录
 
-**改动**:
-- [lvgl_ui.h](components/BSP/LVGL/lvgl_ui.h#L11) — 新增 `HAND_RIGHT` 宏（默认注释，左手模式）
-- [hand_map_right.c](components/BSP/LVGL/hand_map_right.c) — 符号重命名为 `hand_map_right`
-- [lvgl_ui.c](components/BSP/LVGL/lvgl_ui.c) — `#ifdef` 条件选择位图源
-- [ui_matrix.c](components/BSP/LVGL/ui_matrix.c#L19-L119) — 双 `points[]` 数组，右手 gx 坐标镜像 `3.0f - gx`，`origin_x` 反向偏移
-- [ui_matrix.h](components/BSP/LVGL/ui_matrix.h#L4) — 添加 `#include "lvgl_ui.h"` 使宏可见
+### 2026-04-29：UART 缓冲区溢出导致帧错位
 
-### 新增 1：CST816T 触摸 + 调零按钮（2026-04-29）
+现象：传感器数据偶尔出现异常大值，部分帧后半段数据异常。
 
-**内容**:
-- 添加 `espressif/esp_lcd_touch_cst816s` 依赖
-- [lvgl_ui.c](components/BSP/LVGL/lvgl_ui.c) — I2C 初始化 + CST816S 触摸注册 + 右下角 ZERO 调零按钮
-- [uart_receive.c](components/BSP/UART/uart_receive.c) — 新增 `raw_value[32]` / `zero_offset[32]`，`uart_zero_calibrate()` 校准函数
-- [uart_receive.h](components/BSP/UART/uart_receive.h) — 导出 `uart_zero_calibrate()`
+处理：缓冲区溢出时不再直接清空全部数据，而是丢弃最老数据并尝试重新搜索帧头。
 
-### 修复 6：ZERO 按钮间歇性重启（2026-04-29）
+### 2026-04-29：LVGL 锁竞态
 
-**现象**: 点击 ZERO 按钮有时正常有时系统重启
+现象：UART 任务可能在 LVGL 渲染期间直接操作 UI 对象。
 
-**根因**: LVGL 任务栈 4096 字节不足，触摸事件 + 按钮回调 + `printf()` 峰值栈超限
+处理：UI 更新使用 `lvgl_port_lock(pdMS_TO_TICKS(20))`，拿不到锁则跳过本次 UI 刷新。
 
-**修复**: [lvgl_ui.c](components/BSP/LVGL/lvgl_ui.c#L67) — 任务栈 4096 → 8192
+### 2026-04-29：上电后偶尔收不到数据
 
-### 优化 1：热力图色阶（2026-04-29）
+原因：
 
-- 色阶从蓝→青→绿→黄→红改为 `#F5E5E5` (浅粉) → `#FF0000` (正红) 单色渐变
-- 圆点停用滚动条 `LV_SCROLLBAR_MODE_OFF` 消除 9/12 点钟方向横杠
+- UART 初始化早于接收任务，RX 浮空噪声可能填充缓冲区
+- 启动指令可能在接收任务就绪前发出
+- 无超时重发机制
+
+处理：
+
+- 接收任务先于启动指令创建
+- 启动时 `uart_flush_input()`
+- 3 秒无有效帧自动重发启动指令
+
+### 2026-04-29：阵点布局重构
+
+将原矩形网格改为手掌形状布局，`gx/gy` 改为 `float` 以支持精细调节。
+
+### 2026-04-29：CST816S 触摸与 ZERO 调零
+
+新增触摸注册、ZERO 按钮、`raw_value[32]`、`zero_offset[32]` 和 `uart_zero_calibrate()`。
+
+### 2026-04-29：ZERO 按钮触发重启
+
+原因：LVGL 任务栈 4096 字节不足。
+
+处理：LVGL 任务栈扩大到 8192 字节。
+
+### 2026-05-06：电刺激反馈集成
+
+新增 `Stim` 模块，集成 HV2801、DAC80502 和 GPIO3 ADC。刺激方式从“压力控制粗占空比”优化为“压力控制 DAC 电流幅值，电位器控制脉宽，25 Hz 周期输出”。

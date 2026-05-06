@@ -7,6 +7,7 @@
 
 #include "lvgl_ui.h"   // ⭐ 你的UI封装头文件
 #include "uart_receive.h"
+#include "stim.h"
 
 static const char *TAG = "MAIN";
 
@@ -30,12 +31,21 @@ void app_main(void)
 {
     ESP_LOGI(TAG, "System start");
 
+    stim_init();
+
     /* ⭐ 初始化 LVGL + LCD + UI（全部在 lvgl_ui.c 里完成） */
     app_lvgl_ui_init();
 
     ESP_LOGI(TAG, "UI init done");
 
     usart_init(2000000);
+
+    xTaskCreate(stim_task,
+                "stim",
+                3072,
+                NULL,
+                6,
+                NULL);
 
     /* 先创建接收任务，让它在 uart_read_bytes() 上阻塞等待，
        确保 start cmd 发出时接收端已就绪 */

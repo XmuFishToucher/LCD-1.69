@@ -7,6 +7,7 @@
 #include "esp_check.h"
 #include "ui_matrix.h"
 #include "uart_receive.h"
+#include "stim.h"
 #include "driver/i2c_master.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_touch.h"
@@ -114,6 +115,12 @@ static void zero_btn_cb(lv_event_t *e)
     uart_zero_calibrate();
 }
 
+static void stim_switch_cb(lv_event_t *e)
+{
+    lv_obj_t *sw = lv_event_get_target(e);
+    stim_enable(lv_obj_has_state(sw, LV_STATE_CHECKED));
+}
+
 void app_lvgl_ui_init(void)
 {
     ESP_ERROR_CHECK(init_lcd_spi());
@@ -150,6 +157,18 @@ void app_lvgl_ui_init(void)
     lv_label_set_text(label, "ZERO");
     lv_obj_center(label);
     lv_obj_add_event_cb(btn, zero_btn_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *stim_label = lv_label_create(scr);
+    lv_label_set_text(stim_label, "STIM");
+    lv_obj_align(stim_label, LV_ALIGN_BOTTOM_LEFT, 10, -42);
+
+    lv_obj_t *stim_sw = lv_switch_create(scr);
+    lv_obj_set_size(stim_sw, 54, 28);
+    lv_obj_align(stim_sw, LV_ALIGN_BOTTOM_LEFT, 10, -10);
+    if (stim_is_enabled()) {
+        lv_obj_add_state(stim_sw, LV_STATE_CHECKED);
+    }
+    lv_obj_add_event_cb(stim_sw, stim_switch_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
     /* 解锁 */
     lvgl_port_unlock();

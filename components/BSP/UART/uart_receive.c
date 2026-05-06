@@ -2,6 +2,7 @@
 #include <string.h>
 #include "uart.h"
 #include "ui_matrix.h"
+#include "stim.h"
 #include "esp_lvgl_port.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -71,6 +72,8 @@ static void parse_udp11(uint8_t *buf)
         ui_matrix_update(sensor_value);
         lvgl_port_unlock();
     }
+
+    stim_update(sensor_value);
 }
 
 

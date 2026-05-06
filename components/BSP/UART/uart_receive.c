@@ -9,7 +9,7 @@
 
 #define FRAME_SIZE 212
 #define UART_BUF_MAX 1024
-#define UART_PRINT_SENSOR_FRAME 1
+#define UART_PRINT_SENSOR_FRAME 0
 
 static uint8_t uart_buf[UART_BUF_MAX];
 static int uart_len = 0;

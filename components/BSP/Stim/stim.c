@@ -19,10 +19,11 @@
 #define STIM_PRESSURE_MAX 1200.0f
 #define STIM_DAC_IDLE_MV 600
 #define STIM_DAC_MIN_MV 650
-#define STIM_DAC_MAX_MV 950
+#define STIM_DAC_MAX_MV 1050
 #define STIM_PERIOD_MS 40
-#define STIM_PULSE_UNIT_US 100
+#define STIM_PULSE_UNIT_US 300
 #define STIM_ADC_LOG_PERIOD_MS 500
+#define STIM_FORCE_OPEN_CH -1
 
 static const char *TAG = "STIM";
 
@@ -198,6 +199,14 @@ void stim_task(void *arg)
     TickType_t last_wake = xTaskGetTickCount();
     TickType_t last_adc_log = 0;
     uint16_t last_dac_mv = 0xFFFF;
+
+#if STIM_FORCE_OPEN_CH >= 0
+    ESP_LOGW(TAG, "Test mode: force HV channel %d open", STIM_FORCE_OPEN_CH);
+    stim_open_ch(STIM_FORCE_OPEN_CH);
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+#endif
 
     while (1) {
         bool enabled;

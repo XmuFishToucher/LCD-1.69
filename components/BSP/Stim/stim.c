@@ -15,8 +15,8 @@
 #define HV_DIN_GPIO  GPIO_NUM_37
 #define HV_DOUT_GPIO GPIO_NUM_36
 
-#define STIM_PRESSURE_MIN 800.0f
-#define STIM_PRESSURE_MAX 1200.0f
+#define STIM_PRESSURE_MIN 500.0f
+#define STIM_PRESSURE_MAX 800.0f
 #define STIM_DAC_IDLE_MV 600
 #define STIM_DAC_MIN_MV 650
 #define STIM_DAC_MAX_MV 1050
@@ -24,6 +24,7 @@
 #define STIM_PULSE_UNIT_US 300
 #define STIM_ADC_LOG_PERIOD_MS 500
 #define STIM_FORCE_OPEN_CH -1
+#define STIM_HV_CH_UNUSED 0xFF
 
 static const char *TAG = "STIM";
 
@@ -33,6 +34,13 @@ static bool stim_enabled = false;
 static uint8_t target_ch = 0;
 static uint16_t target_dac_mv = STIM_DAC_IDLE_MV;
 static bool target_valid = false;
+
+static const uint8_t sensor_to_hv_ch[32] = {
+    7,  6,  5,  4,  3,  STIM_HV_CH_UNUSED, STIM_HV_CH_UNUSED, STIM_HV_CH_UNUSED,
+    11, 10, 9,  8,  15, 14, 13, 12,
+    19, 18, 17, 16, 31, 30, 29, 28,
+    27, 26, 25, 24, 23, 22, 21, 20,
+};
 
 static void stim_delay_us(void)
 {
@@ -145,6 +153,10 @@ void stim_update(const float sensor[32])
     bool valid = false;
 
     for (uint8_t i = 0; i < 32; i++) {
+        if (sensor_to_hv_ch[i] == STIM_HV_CH_UNUSED) {
+            continue;
+        }
+
         if (sensor[i] > max_val) {
             max_val = sensor[i];
             max_ch = i;
@@ -167,7 +179,7 @@ void stim_update(const float sensor[32])
     }
 
     portENTER_CRITICAL(&stim_lock);
-    target_ch = max_ch;
+    target_ch = sensor_to_hv_ch[max_ch];
     target_dac_mv = dac_mv;
     target_valid = valid;
     portEXIT_CRITICAL(&stim_lock);

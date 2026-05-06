@@ -42,7 +42,7 @@ void app_main(void)
 
     xTaskCreate(stim_task,
                 "stim",
-                3072,
+                4096,
                 NULL,
                 6,
                 NULL);

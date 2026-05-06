@@ -6,6 +6,7 @@
 #include "esp_rom_sys.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "lvgl_ui.h"
 #include "stim_adc.h"
 
 #define HV_CLR_GPIO  GPIO_NUM_40
@@ -14,13 +15,14 @@
 #define HV_DIN_GPIO  GPIO_NUM_37
 #define HV_DOUT_GPIO GPIO_NUM_36
 
-#define STIM_PRESSURE_MIN 500.0f
-#define STIM_PRESSURE_MAX 800.0f
+#define STIM_PRESSURE_MIN 800.0f
+#define STIM_PRESSURE_MAX 1200.0f
 #define STIM_DAC_IDLE_MV 600
 #define STIM_DAC_MIN_MV 650
-#define STIM_DAC_MAX_MV 1050
+#define STIM_DAC_MAX_MV 950
 #define STIM_PERIOD_MS 40
 #define STIM_PULSE_UNIT_US 100
+#define STIM_ADC_LOG_PERIOD_MS 500
 
 static const char *TAG = "STIM";
 
@@ -194,6 +196,7 @@ void stim_close_all(void)
 void stim_task(void *arg)
 {
     TickType_t last_wake = xTaskGetTickCount();
+    TickType_t last_adc_log = 0;
     uint16_t last_dac_mv = 0xFFFF;
 
     while (1) {
@@ -201,8 +204,16 @@ void stim_task(void *arg)
         uint8_t ch;
         uint16_t dac_mv;
         bool valid;
-        uint8_t sensitive = stim_adc_get_sensitive();
+        int adc_raw = stim_adc_read_raw();
+        uint8_t sensitive = stim_adc_raw_to_sensitive(adc_raw);
         uint32_t pulse_width_us = sensitive * STIM_PULSE_UNIT_US;
+        TickType_t now = xTaskGetTickCount();
+
+        if ((now - last_adc_log) >= pdMS_TO_TICKS(STIM_ADC_LOG_PERIOD_MS)) {
+            ESP_LOGI(TAG, "ADC raw: %d, sensitive: %u", adc_raw, sensitive);
+            app_lvgl_ui_set_sensitive(sensitive);
+            last_adc_log = now;
+        }
 
         portENTER_CRITICAL(&stim_lock);
         enabled = stim_enabled;

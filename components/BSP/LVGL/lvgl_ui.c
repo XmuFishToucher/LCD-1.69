@@ -1,4 +1,7 @@
 #include "lvgl_ui.h"
+
+#include <stdio.h>
+
 #include "lcd.h"
 #include "esp_lvgl_port.h"
 #include "esp_err.h"
@@ -12,12 +15,14 @@
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_touch.h"
 #include "esp_lcd_touch_cst816s.h"
+#include "freertos/FreeRTOS.h"
 
 static const char *TAG = "LVGL_UI";
 
 static lv_display_t *lvgl_disp = NULL;
 static lv_indev_t *lvgl_touch_indev = NULL;
 static esp_lcd_touch_handle_t touch_handle = NULL;
+static lv_obj_t *sensitive_value_label = NULL;
 
 #ifdef HAND_RIGHT
 extern const lv_image_dsc_t hand_map_right;
@@ -121,6 +126,22 @@ static void stim_switch_cb(lv_event_t *e)
     stim_enable(lv_obj_has_state(sw, LV_STATE_CHECKED));
 }
 
+void app_lvgl_ui_set_sensitive(uint8_t sensitive)
+{
+    char text[16];
+
+    if (sensitive_value_label == NULL) {
+        return;
+    }
+
+    snprintf(text, sizeof(text), "SEN:%u", sensitive);
+
+    if (lvgl_port_lock(pdMS_TO_TICKS(10))) {
+        lv_label_set_text(sensitive_value_label, text);
+        lvgl_port_unlock();
+    }
+}
+
 void app_lvgl_ui_init(void)
 {
     ESP_ERROR_CHECK(init_lcd_spi());
@@ -169,6 +190,10 @@ void app_lvgl_ui_init(void)
         lv_obj_add_state(stim_sw, LV_STATE_CHECKED);
     }
     lv_obj_add_event_cb(stim_sw, stim_switch_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    sensitive_value_label = lv_label_create(scr);
+    lv_label_set_text(sensitive_value_label, "SEN:0");
+    lv_obj_align(sensitive_value_label, LV_ALIGN_BOTTOM_LEFT, 10, -62);
 
     /* 解锁 */
     lvgl_port_unlock();

@@ -43,10 +43,8 @@ int stim_adc_read_raw(void)
     return raw;
 }
 
-uint8_t stim_adc_get_sensitive(void)
+uint8_t stim_adc_raw_to_sensitive(int raw)
 {
-    int raw = stim_adc_read_raw();
-
     if (raw < 0) {
         raw = 0;
     } else if (raw > 4095) {
@@ -54,4 +52,9 @@ uint8_t stim_adc_get_sensitive(void)
     }
 
     return (uint8_t)((raw * STIM_ADC_SENSITIVE_MAX) / 4095);
+}
+
+uint8_t stim_adc_get_sensitive(void)
+{
+    return stim_adc_raw_to_sensitive(stim_adc_read_raw());
 }

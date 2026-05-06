@@ -9,6 +9,7 @@
 
 #define FRAME_SIZE 212
 #define UART_BUF_MAX 1024
+#define UART_PRINT_SENSOR_FRAME 1
 
 static uint8_t uart_buf[UART_BUF_MAX];
 static int uart_len = 0;
@@ -54,6 +55,7 @@ static void parse_udp11(uint8_t *buf)
     }
 
     // ===== 打印 =====
+#if UART_PRINT_SENSOR_FRAME
     printf("Frame OK | Max: %.3f @ %d\r\n", max_val, max_idx);
 
     for (int i = 0; i < 32; i++)
@@ -64,6 +66,7 @@ static void parse_udp11(uint8_t *buf)
     }
 
     printf("------------------------\r\n");
+#endif
 
     last_frame_ticks = xTaskGetTickCount();
 

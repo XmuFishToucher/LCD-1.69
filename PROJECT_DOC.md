@@ -1,6 +1,6 @@
 # LCD-1.69 项目文档
 
-更新时间：2026-05-06
+更新时间：2026-05-07
 
 ## 项目概述
 
@@ -179,7 +179,7 @@ zero_offset[i] = raw_value[i];
 当前屏幕元素：
 
 - 右手位图：`hand_map_right`
-- 29 个压力热力点
+- 压力热力点数量由 `ui_matrix.h` 中的 `CHANNEL_NUM` 决定，当前为 `16`
 - 右下角 `ZERO` 按钮
 - 左下角 `STIM` 开关
 - `STIM` 上方显示 `SEN:x`
@@ -207,7 +207,32 @@ sensor > 800       -> 最红
 static const point_def_t points[POINT_NUM]
 ```
 
-右手布局：
+显示点数量配置在 `ui_matrix.h`：
+
+```c
+#define SENSOR_TOTAL_NUM 32
+#define CHANNEL_NUM 16
+#define UI_MATRIX_16_X_OFFSET 0
+#define UI_MATRIX_16_Y_OFFSET 0
+```
+
+`CHANNEL_NUM == 16` 时只显示当前使用的手掌 4x4 点位，UART 仍然接收 32 路数据。当前 16 点显示布局：
+
+```text
+第 0 行：ch0  ch12 ch19 ch27
+第 1 行：ch2  ch14 ch17 ch25
+第 2 行：ch4  ch8  ch31 ch23
+第 3 行：ch6  ch10 ch29 ch21
+```
+
+16 点模式下，几何位置对齐到原 29 点右手布局中的手掌区域。若实机显示整体偏移，可只调整：
+
+```c
+#define UI_MATRIX_16_X_OFFSET 0
+#define UI_MATRIX_16_Y_OFFSET 0
+```
+
+`CHANNEL_NUM == 29` 时保留完整右手布局：
 
 ```text
 手掌第 0 行：ch25 ch16 ch12 ch11
@@ -222,7 +247,7 @@ static const point_def_t points[POINT_NUM]
 小拇指：ch4  ch3
 ```
 
-当前右手布局中，传感器通道 `5、6、7` 未使用。
+完整 29 点右手布局中，传感器通道 `5、6、7` 未使用；当前 16 点模式中，传感器通道 `6` 已启用。
 
 ## 电刺激逻辑
 
@@ -273,20 +298,50 @@ pulse_width_us = sensitive * 300 us
 找到最大压力传感通道 -> 查 sensor_to_hv_ch[] -> 打开对应 HV 通道
 ```
 
-当前映射表：
+当前 `CHANNEL_NUM == 16` 映射表：
 
 ```c
 #define STIM_HV_CH_UNUSED 0xFF
 
-static const uint8_t sensor_to_hv_ch[32] = {
-    7,  6,  5,  4,  3,  STIM_HV_CH_UNUSED, STIM_HV_CH_UNUSED, STIM_HV_CH_UNUSED,
-    11, 10, 9,  8,  15, 14, 13, 12,
-    19, 18, 17, 16, 31, 30, 29, 28,
-    27, 26, 25, 24, 23, 22, 21, 20,
+static const uint8_t sensor_to_hv_ch[SENSOR_TOTAL_NUM] = {
+    7,  STIM_HV_CH_UNUSED, 5,  STIM_HV_CH_UNUSED,
+    3,  STIM_HV_CH_UNUSED, 1,  STIM_HV_CH_UNUSED,
+    11, STIM_HV_CH_UNUSED, 9,  STIM_HV_CH_UNUSED,
+    15, STIM_HV_CH_UNUSED, 13, STIM_HV_CH_UNUSED,
+    STIM_HV_CH_UNUSED, 18, STIM_HV_CH_UNUSED, 16,
+    STIM_HV_CH_UNUSED, 30, STIM_HV_CH_UNUSED, 28,
+    STIM_HV_CH_UNUSED, 26, STIM_HV_CH_UNUSED, 24,
+    STIM_HV_CH_UNUSED, 22, STIM_HV_CH_UNUSED, 20,
 };
 ```
 
-明确对应关系：
+当前 16 点明确对应关系：
+
+```text
+sensor 0  -> HV7
+sensor 12 -> HV15
+sensor 19 -> HV16
+sensor 27 -> HV24
+
+sensor 2  -> HV5
+sensor 14 -> HV13
+sensor 17 -> HV18
+sensor 25 -> HV26
+
+sensor 4  -> HV3
+sensor 8  -> HV11
+sensor 31 -> HV20
+sensor 23 -> HV28
+
+sensor 6  -> HV1
+sensor 10 -> HV9
+sensor 29 -> HV22
+sensor 21 -> HV30
+```
+
+注意：当前规则按“传感通道号固定对应硬件 HV 通道”处理。例如显示点从传感 `16` 改为传感 `12` 后，应使用 `sensor 12 -> HV15`，而不是继承原显示位置上 `sensor 16 -> HV19`。
+
+`CHANNEL_NUM == 29` 时完整对应关系：
 
 ```text
 小拇指：
@@ -331,7 +386,7 @@ sensor 1  -> HV6
 sensor 2  -> HV5
 ```
 
-未使用的 `5、6、7` 通道会在 `stim_update()` 中跳过，因此这些通道的噪声不会触发电刺激。
+未使用通道会在 `stim_update()` 中跳过，因此这些通道的噪声不会触发电刺激。
 
 ## HV 固定通道测试模式
 
@@ -607,6 +662,23 @@ sensitive = 10 -> 3000 us
 结果：
 
 - 当前右手传感点位和 HV 电刺激点位已按实测关系分离映射。
+
+### 2026-05-07：16 点手掌模式与几何位置调整
+
+处理：
+
+- 在 `ui_matrix.h` 中增加 `CHANNEL_NUM`，当前设置为 `16`。
+- UART 接收仍保持 32 路，不修改协议和原始数据数组。
+- `CHANNEL_NUM == 16` 时，UI 只显示当前使用的 4x4 手掌点位。
+- `stim.c` 中的 `sensor_to_hv_ch[]` 也按 `CHANNEL_NUM` 分支，未使用传感通道标记为 `STIM_HV_CH_UNUSED`。
+- 传感通道 `6` 已加入当前 16 点模式，并映射到 `HV1`。
+- 将 16 点阵列几何位置对齐到原 29 点右手布局的手掌区域。
+- 增加 `UI_MATRIX_16_X_OFFSET` 和 `UI_MATRIX_16_Y_OFFSET`，用于实机微调阵点整体偏移。
+
+关键确认：
+
+- 传感通道和 HV 的关系按硬件通道号固定对应，不按显示点位继承。
+- 因此当前显示使用 `sensor 12` 时，应映射到原 `sensor 12` 对应的 `HV15`，不是原显示位置上 `sensor 16` 的 `HV19`。
 
 ### 2026-05-06：hand_map.c 编译错误修复
 

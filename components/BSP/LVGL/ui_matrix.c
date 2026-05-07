@@ -1,8 +1,14 @@
 #include "lvgl.h"
-#include "lvgl_ui.h"
+#include "ui_matrix.h"
 #include <stdio.h>
 
+#if CHANNEL_NUM == 16
+#define POINT_NUM 16
+#elif CHANNEL_NUM == 29
 #define POINT_NUM 29
+#else
+#error "Unsupported CHANNEL_NUM"
+#endif
 
 // 阵点网格坐标 (gx, gy) 及对应数据通道号
 // gx: -1~4, gy: -3~3, cell = 20px (16px圆点 + 4px间距)
@@ -16,6 +22,14 @@ typedef struct {
 // ================================================================
 //  左手阵点布局 (已调试完毕)
 // ================================================================
+#if CHANNEL_NUM == 16
+static const point_def_t points[POINT_NUM] = {
+    { 0,  0,  0},  {12,  1,  0},  {19,  2,  0},  {27,  3,  0},
+    { 2,  0,  1},  {14,  1,  1},  {17,  2,  1},  {25,  3,  1},
+    { 4,  0,  2},  { 8,  1,  2},  {31,  2,  2},  {23,  3,  2},
+    { 6,  0,  3},  {10,  1,  3},  {29,  2,  3},  {21,  3,  3},
+};
+#elif CHANNEL_NUM == 29
 #ifndef HAND_RIGHT
 static const point_def_t points[POINT_NUM] = {
 
@@ -117,6 +131,7 @@ static const point_def_t points[POINT_NUM] = {
     {3, -1.4f,  -1.5f},
 };
 #endif
+#endif
 
 static lv_obj_t *cells[POINT_NUM];
 
@@ -141,18 +156,45 @@ void ui_matrix_create(void)
     // 网格范围: gx=-1..4 (6列), gy=-3..3 (7行)
     int cols = 6;
     int rows = 7;
-    int grid_w = cols * cell - dot_spacing; // 6*20-4 = 116
-    int grid_h = rows * cell - dot_spacing; // 7*20-4 = 136
+    int full_grid_w = cols * cell - dot_spacing; // 6*20-4 = 116
+    int full_grid_h = rows * cell - dot_spacing; // 7*20-4 = 136
+#if CHANNEL_NUM == 16
+    int grid_w = 4 * cell - dot_spacing;
+    int grid_h = 4 * cell - dot_spacing;
+#else
+    int grid_w = full_grid_w;
+    int grid_h = full_grid_h;
+#endif
 
-    int origin_x = (240 - grid_w) / 2
+    int origin_x = (240 - full_grid_w) / 2
+#if CHANNEL_NUM == 16
+                   + cell
+#ifdef HAND_RIGHT
+                   - 20
+#else
+                   + 20
+#endif
+                   + UI_MATRIX_16_X_OFFSET;
+#else
 #ifdef HAND_RIGHT
                    - 20;   // 右手：左移为右侧拇指留空间
 #else
                    + 20;   // 左手：右移为左侧拇指留空间
 #endif
-    int origin_y = (280 - grid_h) / 2;
+#endif
+    int origin_y = (280 - full_grid_h) / 2
+#if CHANNEL_NUM == 16
+                   + 3 * cell + UI_MATRIX_16_Y_OFFSET;
+#else
+                   ;
+#endif
+#if CHANNEL_NUM == 16
+    int min_gx = 0;
+    int min_gy = 0;
+#else
     int min_gx = -1;
     int min_gy = -3;
+#endif
 
     lv_obj_t *screen = lv_scr_act();
 

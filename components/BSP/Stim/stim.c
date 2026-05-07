@@ -8,6 +8,7 @@
 #include "freertos/task.h"
 #include "lvgl_ui.h"
 #include "stim_adc.h"
+#include "ui_matrix.h"
 
 #define HV_CLR_GPIO  GPIO_NUM_40
 #define HV_CS_GPIO   GPIO_NUM_39
@@ -35,12 +36,27 @@ static uint8_t target_ch = 0;
 static uint16_t target_dac_mv = STIM_DAC_IDLE_MV;
 static bool target_valid = false;
 
-static const uint8_t sensor_to_hv_ch[32] = {
+#if CHANNEL_NUM == 16
+static const uint8_t sensor_to_hv_ch[SENSOR_TOTAL_NUM] = {
+    7,  STIM_HV_CH_UNUSED, 5,  STIM_HV_CH_UNUSED,
+    3,  STIM_HV_CH_UNUSED, 1,  STIM_HV_CH_UNUSED,
+    11, STIM_HV_CH_UNUSED, 9,  STIM_HV_CH_UNUSED,
+    15, STIM_HV_CH_UNUSED, 13, STIM_HV_CH_UNUSED,
+    STIM_HV_CH_UNUSED, 18, STIM_HV_CH_UNUSED, 16,
+    STIM_HV_CH_UNUSED, 30, STIM_HV_CH_UNUSED, 28,
+    STIM_HV_CH_UNUSED, 26, STIM_HV_CH_UNUSED, 24,
+    STIM_HV_CH_UNUSED, 22, STIM_HV_CH_UNUSED, 20,
+};
+#elif CHANNEL_NUM == 29
+static const uint8_t sensor_to_hv_ch[SENSOR_TOTAL_NUM] = {
     7,  6,  5,  4,  3,  STIM_HV_CH_UNUSED, STIM_HV_CH_UNUSED, STIM_HV_CH_UNUSED,
     11, 10, 9,  8,  15, 14, 13, 12,
     19, 18, 17, 16, 31, 30, 29, 28,
     27, 26, 25, 24, 23, 22, 21, 20,
 };
+#else
+#error "Unsupported CHANNEL_NUM"
+#endif
 
 static void stim_delay_us(void)
 {
@@ -152,7 +168,7 @@ void stim_update(const float sensor[32])
     uint16_t dac_mv = STIM_DAC_IDLE_MV;
     bool valid = false;
 
-    for (uint8_t i = 0; i < 32; i++) {
+    for (uint8_t i = 0; i < SENSOR_TOTAL_NUM; i++) {
         if (sensor_to_hv_ch[i] == STIM_HV_CH_UNUSED) {
             continue;
         }

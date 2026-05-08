@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdbool.h>
 #include <string.h>
 #include "uart.h"
 #include "ui_matrix.h"
@@ -10,13 +11,19 @@
 #define FRAME_SIZE 212
 #define UART_BUF_MAX 1024
 #define UART_PRINT_SENSOR_FRAME 0
+#define SENSOR_FILTER_ALPHA 0.2f
+#define ZERO_CALIBRATE_FRAMES 10
 
 static uint8_t uart_buf[UART_BUF_MAX];
 static int uart_len = 0;
 
 static float sensor_value[32];
+static float filtered_value[32];
 static float raw_value[32];
 static float zero_offset[32];
+static float zero_sum[32];
+static int zero_frames_left = 0;
+static bool filter_ready = false;
 static TickType_t last_frame_ticks;
 
 // =========================
@@ -41,10 +48,38 @@ static void parse_udp11(uint8_t *buf)
             (buf[offset + 4] << 8) |
             buf[offset + 5];
 
-        sensor_value[i] =
+        raw_value[i] =
             int_part + dec_part / 1000000.0f;
-        raw_value[i] = sensor_value[i];
-        sensor_value[i] -= zero_offset[i];
+    }
+
+    if (zero_frames_left > 0) {
+        for (int i = 0; i < 32; i++) {
+            zero_sum[i] += raw_value[i];
+        }
+
+        zero_frames_left--;
+        if (zero_frames_left == 0) {
+            for (int i = 0; i < 32; i++) {
+                zero_offset[i] = zero_sum[i] / ZERO_CALIBRATE_FRAMES;
+                sensor_value[i] = 0.0f;
+                filtered_value[i] = 0.0f;
+            }
+            filter_ready = false;
+            printf("Zero calibrated (%d frames)\r\n", ZERO_CALIBRATE_FRAMES);
+        }
+    }
+
+    for (int i = 0; i < 32; i++)
+    {
+        float zeroed_value = raw_value[i] - zero_offset[i];
+
+        if (!filter_ready) {
+            filtered_value[i] = zeroed_value;
+        } else {
+            filtered_value[i] += SENSOR_FILTER_ALPHA *
+                                 (zeroed_value - filtered_value[i]);
+        }
+        sensor_value[i] = filtered_value[i];
 
         // 找最大值（后面做电刺激直接用）
         if (sensor_value[i] > max_val)
@@ -53,6 +88,7 @@ static void parse_udp11(uint8_t *buf)
             max_idx = i;
         }
     }
+    filter_ready = true;
 
     // ===== 打印 =====
 #if UART_PRINT_SENSOR_FRAME
@@ -160,9 +196,13 @@ static void resend_start_cmd(void)
 void uart_zero_calibrate(void)
 {
     for (int i = 0; i < 32; i++) {
-        zero_offset[i] = raw_value[i];
+        zero_sum[i] = 0.0f;
+        sensor_value[i] = 0.0f;
+        filtered_value[i] = 0.0f;
     }
-    printf("Zero calibrated\r\n");
+    zero_frames_left = ZERO_CALIBRATE_FRAMES;
+    filter_ready = false;
+    printf("Zero calibrating (%d frames)\r\n", ZERO_CALIBRATE_FRAMES);
 }
 
 void uart_receive_task(void *arg)

@@ -1,6 +1,6 @@
 # LCD-1.69 项目文档
 
-更新时间：2026-05-07
+更新时间：2026-05-08
 
 ## 项目概述
 
@@ -148,25 +148,36 @@ app_main()
 
 ## 传感数据流程
 
-UART 解析后保存 32 路传感器数据：
+UART 解析后保存 32 路传感器数据。当前数据流程为：
 
 ```c
 raw_value[i] = int_part + dec_part / 1000000.0f;
-sensor_value[i] = raw_value[i] - zero_offset[i];
+zeroed_value = raw_value[i] - zero_offset[i];
+filtered_value[i] += SENSOR_FILTER_ALPHA * (zeroed_value - filtered_value[i]);
+sensor_value[i] = filtered_value[i];
 ```
 
-显示和电刺激都使用调零后的 `sensor_value`：
+当前滤波参数在 `uart_receive.c`：
+
+```c
+#define SENSOR_FILTER_ALPHA 0.2f
+```
+
+显示和电刺激都使用调零并滤波后的 `sensor_value`：
 
 ```c
 ui_matrix_update(sensor_value);
 stim_update(sensor_value);
 ```
 
-点击 `ZERO` 后记录当前 raw 值作为零点：
+点击 `ZERO` 后不再只取单帧，而是累计多帧 raw 值取平均作为零点：
 
 ```c
-zero_offset[i] = raw_value[i];
+#define ZERO_CALIBRATE_FRAMES 10
+zero_offset[i] = zero_sum[i] / ZERO_CALIBRATE_FRAMES;
 ```
+
+多帧清零期间，当前实现会继续进入 UART 数据流程；如果佩戴贴片后基线仍然快速漂移，可能出现清零后很快重新变红的现象。
 
 当前已关闭逐帧串口打印：
 
@@ -289,6 +300,18 @@ pulse_width_us = sensitive * 300 us
 ```
 
 `stim_task()` 每 `500 ms` 打印一次 ADC raw 和 sensitive，并同步更新屏幕上的 `SEN:x`。
+
+## 当前任务优先级
+
+当前代码已恢复到调整优先级前的配置：
+
+```text
+LVGL task priority = 4
+stim_task priority = 6
+uart_rx priority = 10
+```
+
+曾尝试将 LVGL 提高到 8、UART 降到 7 来改善触摸响应，但对“清零后阵点重新变红”的现象帮助不明显，因此已回退。当前判断该现象主要来自贴片佩戴后的基线漂移、机械接触波动或传感噪声，而不是单纯的触摸任务优先级问题。
 
 ## 传感通道到 HV 通道映射
 
@@ -679,6 +702,42 @@ sensitive = 10 -> 3000 us
 
 - 传感通道和 HV 的关系按硬件通道号固定对应，不按显示点位继承。
 - 因此当前显示使用 `sensor 12` 时，应映射到原 `sensor 12` 对应的 `HV15`，不是原显示位置上 `sensor 16` 的 `HV19`。
+
+### 2026-05-08：贴片佩戴后波动与清零策略尝试
+
+现象：
+
+- 贴片带在手上后，传感信号波动明显增大。
+- 点击 `ZERO` 后阵点会先变淡，随后又快速变红，清零效果不稳定。
+
+已尝试处理：
+
+- 在 UART 数据路径中增加 EMA 一阶低通滤波：
+
+```c
+#define SENSOR_FILTER_ALPHA 0.2f
+```
+
+- 将单帧清零改为 10 帧 raw 平均清零：
+
+```c
+#define ZERO_CALIBRATE_FRAMES 10
+```
+
+- 曾尝试提高 LVGL 任务优先级、降低 UART 接收任务优先级，以改善触摸响应；效果不明显，已恢复为原优先级配置。
+
+当前判断：
+
+- 清零按键本身不是主要问题。
+- 更可能是贴片佩戴后的机械应力变化、接触状态变化或基线漂移持续存在，导致清零完成后新的调零数据仍然很快超过显示/刺激阈值。
+
+后续建议：
+
+- 增加清零后死区，例如小于某个阈值的变化直接置 0。
+- 对负值进行归零或单独处理，避免回弹和漂移影响最大值选择。
+- 进一步增加清零帧数，如 `30` 或 `50` 帧。
+- 将显示阈值和刺激阈值分开：显示可以敏感，刺激阈值应更保守。
+- 机械上固定贴片和线束，减少手部动作带来的传感点应力变化。
 
 ### 2026-05-06：hand_map.c 编译错误修复
 
